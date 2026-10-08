@@ -92,6 +92,7 @@ created_at timestamptz             role            text  -- 'user' | 'assistant'
 | `POST` | `/chat/stream` | Same, but streams the reply token-by-token (conversation id in `X-Conversation-Id` header) |
 | `GET`  | `/conversations` | Sidebar list (most recent 50) |
 | `GET`  | `/conversation/{id}` | Full transcript for one conversation |
+| `DELETE` | `/conversation/{id}` | Delete a conversation (messages cascade via the DB) |
 | `GET`  | `/health` | Liveness probe |
 
 Request/response bodies are validated by **Pydantic** — malformed input is rejected at the edge before any handler logic runs.
