@@ -88,7 +88,7 @@ export default function Home() {
     setLoading(true);
 
     try {
-      const r = await fetch("/api/chat", {
+      const r = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -96,10 +96,39 @@ export default function Home() {
           conversation_id: conversationId.current,
         }),
       });
-      const data = await r.json();
-      conversationId.current = data.conversation_id;
-      setActiveId(data.conversation_id);
-      setMessages((m) => [...m, { role: "bot", text: data.reply }]);
+
+      // The conversation id arrives in a header, before the streamed body.
+      const cid = r.headers.get("X-Conversation-Id");
+      if (cid) {
+        conversationId.current = cid;
+        setActiveId(cid);
+      }
+
+      // Read the body as a stream of text chunks and append them live.
+      const reader = r.body!.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      let started = false;
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        if (!started) {
+          // First token: drop the "thinking" dots and create the bot bubble.
+          started = true;
+          setLoading(false);
+          setMessages((m) => [...m, { role: "bot", text: acc }]);
+        } else {
+          // Subsequent tokens: update the last (bot) bubble in place.
+          setMessages((m) => {
+            const copy = [...m];
+            copy[copy.length - 1] = { role: "bot", text: acc };
+            return copy;
+          });
+        }
+      }
+
       // If this message started a new conversation, refresh the sidebar.
       if (wasNew) refreshConvos();
     } catch (err) {

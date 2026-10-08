@@ -88,7 +88,8 @@ created_at timestamptz             role            text  -- 'user' | 'assistant'
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/chat` | Send a message; returns the reply + conversation id |
+| `POST` | `/chat` | Send a message; returns the full reply + conversation id |
+| `POST` | `/chat/stream` | Same, but streams the reply token-by-token (conversation id in `X-Conversation-Id` header) |
 | `GET`  | `/conversations` | Sidebar list (most recent 50) |
 | `GET`  | `/conversation/{id}` | Full transcript for one conversation |
 | `GET`  | `/health` | Liveness probe |
@@ -111,6 +112,8 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **Async end-to-end.** FastAPI + async SQLAlchemy + httpx mean a slow inference call parks on `await` instead of blocking a worker — one process serves many concurrent chats.
 
+**Streaming as a pass-through pipe.** `/chat/stream` relays Ollama's token stream straight to the browser (`StreamingResponse`, chunked transfer) and buffers only to persist the finished reply in one transaction. Cuts *perceived* latency to the first token while keeping writes correct.
+
 ---
 
 ## Scaling: what changes at 10×/100×
@@ -120,7 +123,6 @@ Honest about current limits and the next moves:
 - **Context window** — full-transcript replay grows unboundedly. *Next:* sliding window + periodic summarization of older turns.
 - **Inference throughput** — one local Ollama is the bottleneck. *Next:* a model-server pool / hosted inference behind the same single call-site.
 - **Hot reads** — reintroduce **Redis** as a cache for active conversations and the sidebar list; Postgres stays source of truth.
-- **Streaming** — swap the buffered reply for **SSE** token streaming for perceived latency.
 - **Multi-tenancy** — add a `users` table + auth; `conversations.user_id` is the natural partition/shard key.
 - **Delivery** — containerize, add read replicas, and connection pooling (PgBouncer) as write/read load diverges.
 
