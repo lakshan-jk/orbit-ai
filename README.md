@@ -117,13 +117,14 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **System prompt injected, not stored.** Orbit's personality is a `system` message prepended at inference time — never written to the DB. It's config, not conversation: editing one constant re-flavours every chat (past and future), with no migration and no per-row rewrite.
 
+**Bounded context, complete storage.** Transcripts are stored in full, but inference only ever sees a size-bounded view: a rolling model-generated **summary** of older messages plus a verbatim tail of recent ones. A `summarized_count` watermark guarantees every message is represented exactly once (in the summary *or* the tail). This caps prompt size as chats grow — without ever losing stored history.
+
 ---
 
 ## Scaling: what changes at 10×/100×
 
 Honest about current limits and the next moves:
 
-- **Context window** — full-transcript replay grows unboundedly. *Next:* sliding window + periodic summarization of older turns.
 - **Inference throughput** — one local Ollama is the bottleneck. *Next:* a model-server pool / hosted inference behind the same single call-site.
 - **Hot reads** — reintroduce **Redis** as a cache for active conversations and the sidebar list; Postgres stays source of truth.
 - **Multi-tenancy** — add a `users` table + auth; `conversations.user_id` is the natural partition/shard key.

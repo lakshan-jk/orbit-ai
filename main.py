@@ -33,6 +33,63 @@ SYSTEM_PROMPT = (
 # Precomputed so we don't rebuild it on every request.
 SYSTEM_MESSAGE = {"role": "system", "content": SYSTEM_PROMPT}
 
+# Context-window management. Everything before `summarized_count` is captured in
+# the conversation's rolling summary; the rest ("the tail") is sent verbatim.
+# When the tail grows past WINDOW + BATCH, we fold its oldest BATCH into the summary.
+HISTORY_WINDOW = 8   # recent messages always kept verbatim
+SUMMARY_BATCH = 4    # how many messages we compress per fold
+
+
+async def summarize_older(prev_summary: str | None, msgs: list[dict]) -> str:
+    """Fold older messages into a concise running summary (one model call)."""
+    transcript = "\n".join(f"{m['role']}: {m['content']}" for m in msgs)
+    instruction = (
+        "You maintain a running summary of a chat so future replies keep context. "
+        "Capture durable facts, decisions, names, and the user's goals. Keep it to "
+        "a few sentences. Return ONLY the updated summary, nothing else."
+    )
+    user_block = (
+        f"Existing summary:\n{prev_summary}\n\n" if prev_summary else ""
+    ) + f"New messages to fold in:\n{transcript}"
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": user_block},
+        ],
+        "stream": False,
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(OLLAMA_URL, json=payload)
+        return r.json()["message"]["content"].strip()
+
+
+async def build_context(conv: Conversation, history: list[dict]) -> list[dict]:
+    """Messages to actually send the model: system + (summary) + un-summarized tail.
+
+    Stored messages are never dropped — we only shrink what we *send*. Every
+    message is represented either inside conv.summary or verbatim in the tail.
+    """
+    tail = history[conv.summarized_count :]
+
+    # Tail too long? Compress its oldest BATCH into the rolling summary.
+    if len(tail) > HISTORY_WINDOW + SUMMARY_BATCH:
+        fold = history[conv.summarized_count : conv.summarized_count + SUMMARY_BATCH]
+        conv.summary = await summarize_older(conv.summary, fold)
+        conv.summarized_count += SUMMARY_BATCH
+        tail = history[conv.summarized_count :]
+
+    context = [SYSTEM_MESSAGE]
+    if conv.summary:
+        context.append(
+            {
+                "role": "system",
+                "content": f"Summary of earlier conversation:\n{conv.summary}",
+            }
+        )
+    context.extend(tail)
+    return context
+
 
 # The shape of an incoming order. `conversation_id` is optional: on the very
 # first message the client has none, so the server creates one and hands it back.
@@ -94,13 +151,14 @@ async def delete_conversation(conv_id: str):
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    is_new = req.conversation_id is None
     conv_id = req.conversation_id or str(uuid.uuid4())
 
     async with SessionLocal() as session:
-        # 1. A brand-new conversation gets its own row, titled by the first message.
-        if is_new:
-            session.add(Conversation(id=conv_id, title=req.message[:40]))
+        # 1. Load the conversation row, creating it (titled) if brand-new.
+        conv = await session.get(Conversation, conv_id)
+        if conv is None:
+            conv = Conversation(id=conv_id, title=req.message[:40])
+            session.add(conv)
 
         # 2. Load prior messages from Postgres to rebuild the history (the "memory").
         prior = await session.scalars(
@@ -116,8 +174,9 @@ async def chat(req: ChatRequest):
             Message(conversation_id=conv_id, role="user", content=req.message)
         )
 
-        # 4. Send the ENTIRE history to the kitchen — this is what "memory" means.
-        payload = {"model": MODEL, "messages": [SYSTEM_MESSAGE, *history], "stream": False}
+        # 4. Build a size-bounded context (system + rolling summary + recent tail).
+        context = await build_context(conv, history)
+        payload = {"model": MODEL, "messages": context, "stream": False}
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(OLLAMA_URL, json=payload)
             data = r.json()
@@ -136,15 +195,16 @@ async def chat(req: ChatRequest):
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
     # Same logic as /chat, but we relay tokens to the browser as they arrive.
-    is_new = req.conversation_id is None
     conv_id = req.conversation_id or str(uuid.uuid4())
 
     async def token_stream():
         # The DB session stays open for the whole stream, so we can save the
         # finished reply at the end — all inside one generator.
         async with SessionLocal() as session:
-            if is_new:
-                session.add(Conversation(id=conv_id, title=req.message[:40]))
+            conv = await session.get(Conversation, conv_id)
+            if conv is None:
+                conv = Conversation(id=conv_id, title=req.message[:40])
+                session.add(conv)
 
             prior = await session.scalars(
                 select(Message)
@@ -156,9 +216,13 @@ async def chat_stream(req: ChatRequest):
             session.add(
                 Message(conversation_id=conv_id, role="user", content=req.message)
             )
-            await session.commit()  # persist the user turn before we start talking
 
-            payload = {"model": MODEL, "messages": [SYSTEM_MESSAGE, *history], "stream": True}
+            # Build the size-bounded context (may update the rolling summary),
+            # then persist the user turn + any summary change before we stream.
+            context = await build_context(conv, history)
+            await session.commit()
+
+            payload = {"model": MODEL, "messages": context, "stream": True}
             parts: list[str] = []
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", OLLAMA_URL, json=payload) as resp:
