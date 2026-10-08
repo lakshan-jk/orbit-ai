@@ -114,6 +114,8 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **Streaming as a pass-through pipe.** `/chat/stream` relays Ollama's token stream straight to the browser (`StreamingResponse`, chunked transfer) and buffers only to persist the finished reply in one transaction. Cuts *perceived* latency to the first token while keeping writes correct.
 
+**System prompt injected, not stored.** Orbit's personality is a `system` message prepended at inference time — never written to the DB. It's config, not conversation: editing one constant re-flavours every chat (past and future), with no migration and no per-row rewrite.
+
 ---
 
 ## Scaling: what changes at 10×/100×

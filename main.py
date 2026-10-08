@@ -17,6 +17,22 @@ app = FastAPI(title="Pulse")
 OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
 MODEL = "llama3.2"
 
+# Orbit's personality. Injected as a "system" message on every inference call
+# (never stored in the DB) — so editing this instantly re-flavours every chat.
+SYSTEM_PROMPT = (
+    "You are Orbit, a sharp, witty AI assistant that runs entirely on the user's "
+    "own machine — no cloud, no data leaving the device, and you're quietly proud "
+    "of that. Your tone is warm, concise, and a little playful, with the occasional "
+    "light space/cosmic metaphor (used sparingly — seasoning, not the whole meal). "
+    "You give direct, genuinely useful answers first; personality never gets in the "
+    "way of being correct and clear. If you don't know something, say so plainly. "
+    "Prefer short paragraphs and tidy formatting. Never claim to have real-time or "
+    "internet access — you're a local model."
+)
+
+# Precomputed so we don't rebuild it on every request.
+SYSTEM_MESSAGE = {"role": "system", "content": SYSTEM_PROMPT}
+
 
 # The shape of an incoming order. `conversation_id` is optional: on the very
 # first message the client has none, so the server creates one and hands it back.
@@ -88,7 +104,7 @@ async def chat(req: ChatRequest):
         )
 
         # 4. Send the ENTIRE history to the kitchen — this is what "memory" means.
-        payload = {"model": MODEL, "messages": history, "stream": False}
+        payload = {"model": MODEL, "messages": [SYSTEM_MESSAGE, *history], "stream": False}
         async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(OLLAMA_URL, json=payload)
             data = r.json()
@@ -129,7 +145,7 @@ async def chat_stream(req: ChatRequest):
             )
             await session.commit()  # persist the user turn before we start talking
 
-            payload = {"model": MODEL, "messages": history, "stream": True}
+            payload = {"model": MODEL, "messages": [SYSTEM_MESSAGE, *history], "stream": True}
             parts: list[str] = []
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream("POST", OLLAMA_URL, json=payload) as resp:
