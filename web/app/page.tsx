@@ -65,6 +65,13 @@ export default function Home() {
     setInput("");
   }
 
+  async function deleteChat(id: string) {
+    await fetch(`/api/conversation/${id}`, { method: "DELETE" });
+    // If we deleted the chat we're currently viewing, reset to a fresh one.
+    if (conversationId.current === id) newChat();
+    refreshConvos();
+  }
+
   async function openChat(id: string) {
     conversationId.current = id;
     setActiveId(id);
@@ -168,19 +175,43 @@ export default function Home() {
             </p>
           )}
           {convos.map((c) => (
-            <button
+            <div
               key={c.id}
-              onClick={() => openChat(c.id)}
               className={
-                "mb-1 w-full truncate rounded-lg px-3 py-2 text-left text-sm transition " +
+                "group mb-1 flex items-center rounded-lg transition " +
                 (c.id === activeId
-                  ? "bg-white/[0.08] text-neutral-100"
-                  : "text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200")
+                  ? "bg-white/[0.08]"
+                  : "hover:bg-white/[0.04]")
               }
-              title={c.title}
             >
-              {c.title}
-            </button>
+              <button
+                onClick={() => openChat(c.id)}
+                className={
+                  "min-w-0 flex-1 truncate px-3 py-2 text-left text-sm " +
+                  (c.id === activeId
+                    ? "text-neutral-100"
+                    : "text-neutral-400 group-hover:text-neutral-200")
+                }
+                title={c.title}
+              >
+                {c.title}
+              </button>
+              <button
+                onClick={() => deleteChat(c.id)}
+                aria-label="Delete conversation"
+                title="Delete"
+                className="mr-1 hidden shrink-0 rounded-md p-1.5 text-neutral-500 transition hover:bg-white/10 hover:text-rose-400 group-hover:block"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v12a1 1 0 01-1 1H7a1 1 0 01-1-1V7"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       </aside>

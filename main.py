@@ -5,7 +5,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from db import SessionLocal
 from models import Conversation, Message
@@ -77,6 +77,19 @@ async def get_conversation(conv_id: str):
         return {
             "messages": [{"role": m.role, "content": m.content} for m in rows]
         }
+
+
+@app.delete("/conversation/{conv_id}")
+async def delete_conversation(conv_id: str):
+    # Delete the conversation row. Its messages are removed automatically by the
+    # database via the ON DELETE CASCADE on messages.conversation_id — one
+    # statement, Postgres handles the children.
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(Conversation).where(Conversation.id == conv_id)
+        )
+        await session.commit()
+    return {"ok": True}
 
 
 @app.post("/chat")
