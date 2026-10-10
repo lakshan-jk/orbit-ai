@@ -69,13 +69,14 @@ A `POST /chat` with `{ message, conversation_id? }`:
 One-to-many, with a cascading foreign key:
 
 ```
-conversations                      messages
-─────────────                      ────────
-id         text  PK  ◀──────┐      id              int  PK (serial)
-title      text             └───── conversation_id text FK (indexed, ON DELETE CASCADE)
-created_at timestamptz             role            text  -- 'user' | 'assistant'
-                                   content         text
-                                   created_at      timestamptz
+users                  conversations                      messages
+─────                  ─────────────                      ────────
+id            text PK  id         text  PK  ◀──────┐      id              int  PK (serial)
+email         unique   user_id    text  FK ─┐       └──── conversation_id text FK (indexed, CASCADE)
+password_hash text     title      text      │(indexed,          role       text  -- user|assistant
+created_at    tstz     created_at timestamptz│ CASCADE)         content    text
+                    ┌──── (owner) ◀──────────┘                  created_at timestamptz
+users.id ◀──────────┘
 ```
 
 - **Messages are first-class rows**, not a JSON blob — so they can be counted, searched, paginated, and joined.
@@ -88,6 +89,8 @@ created_at timestamptz             role            text  -- 'user' | 'assistant'
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| `POST` | `/auth/register` | Create an account; returns a JWT |
+| `POST` | `/auth/login` | Log in; returns a JWT |
 | `POST` | `/chat` | Send a message; returns the full reply + conversation id |
 | `POST` | `/chat/stream` | Same, but streams the reply token-by-token (conversation id in `X-Conversation-Id` header) |
 | `GET`  | `/conversations` | Sidebar list (most recent 50) |
@@ -95,7 +98,7 @@ created_at timestamptz             role            text  -- 'user' | 'assistant'
 | `DELETE` | `/conversation/{id}` | Delete a conversation (messages cascade via the DB) |
 | `GET`  | `/health` | Liveness probe |
 
-Request/response bodies are validated by **Pydantic** — malformed input is rejected at the edge before any handler logic runs.
+Request/response bodies are validated by **Pydantic** — malformed input is rejected at the edge before any handler logic runs. All `/chat*` and `/conversation*` routes require a `Bearer` JWT and are scoped to the authenticated user.
 
 ---
 
@@ -119,6 +122,10 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **Bounded context, complete storage.** Transcripts are stored in full, but inference only ever sees a size-bounded view: a rolling model-generated **summary** of older messages plus a verbatim tail of recent ones. A `summarized_count` watermark guarantees every message is represented exactly once (in the summary *or* the tail). This caps prompt size as chats grow — without ever losing stored history.
 
+**Stateless auth via JWT.** Login issues a signed JWT; the client sends it as a `Bearer` token on every request. No server-side session store — the token *is* the session, which keeps the API horizontally scalable (any instance can verify it with the shared secret). Passwords are **bcrypt**-hashed, never stored in plaintext.
+
+**Ownership enforced in the query, not the app.** Every conversation read/write is scoped by `WHERE user_id = <caller>`. Accessing another user's conversation returns `404` (not `403`) so the API never even confirms the row exists. Tenant isolation lives at the data-access layer, not in scattered `if` checks.
+
 ---
 
 ## Scaling: what changes at 10×/100×
@@ -127,7 +134,7 @@ Honest about current limits and the next moves:
 
 - **Inference throughput** — one local Ollama is the bottleneck. *Next:* a model-server pool / hosted inference behind the same single call-site.
 - **Hot reads** — reintroduce **Redis** as a cache for active conversations and the sidebar list; Postgres stays source of truth.
-- **Multi-tenancy** — add a `users` table + auth; `conversations.user_id` is the natural partition/shard key.
+- **Multi-tenancy at scale** — users + per-user ownership exist; `conversations.user_id` is the natural partition/shard key when one DB is no longer enough.
 - **Delivery** — containerize, add read replicas, and connection pooling (PgBouncer) as write/read load diverges.
 
 ---

@@ -2,13 +2,14 @@ import json
 import uuid
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
+from auth import create_token, current_user_id, hash_password, verify_password
 from db import SessionLocal
-from models import Conversation, Message
+from models import Conversation, Message, User
 
 # `app` is our waiter. Every route below is something the waiter knows how to do.
 app = FastAPI(title="Pulse")
@@ -98,6 +99,42 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
 
 
+class AuthRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/register")
+async def register(req: AuthRequest):
+    email = req.email.strip().lower()
+    if not email or len(req.password) < 6:
+        raise HTTPException(400, "Email required and password must be 6+ characters")
+    async with SessionLocal() as session:
+        existing = await session.scalar(select(User).where(User.email == email))
+        if existing:
+            raise HTTPException(409, "Email already registered")
+        user = User(
+            id=str(uuid.uuid4()),
+            email=email,
+            password_hash=hash_password(req.password),
+        )
+        session.add(user)
+        await session.commit()
+        return {"token": create_token(user.id), "email": user.email}
+
+
+@app.post("/auth/login")
+async def login(req: AuthRequest):
+    email = req.email.strip().lower()
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.email == email))
+        # Same error whether the email is unknown or the password is wrong —
+        # don't leak which accounts exist.
+        if user is None or not verify_password(req.password, user.password_hash):
+            raise HTTPException(401, "Invalid email or password")
+        return {"token": create_token(user.id), "email": user.email}
+
+
 @app.get("/")
 def home():
     # Serve the chat web page (the "dining room").
@@ -111,11 +148,14 @@ def health():
 
 
 @app.get("/conversations")
-async def list_conversations():
-    # The sidebar list, newest first — one row per conversation.
+async def list_conversations(user_id: str = Depends(current_user_id)):
+    # The sidebar list — only THIS user's conversations, newest first.
     async with SessionLocal() as session:
         rows = await session.scalars(
-            select(Conversation).order_by(Conversation.created_at.desc()).limit(50)
+            select(Conversation)
+            .where(Conversation.user_id == user_id)
+            .order_by(Conversation.created_at.desc())
+            .limit(50)
         )
         return {
             "conversations": [{"id": c.id, "title": c.title} for c in rows]
@@ -123,9 +163,12 @@ async def list_conversations():
 
 
 @app.get("/conversation/{conv_id}")
-async def get_conversation(conv_id: str):
-    # Load one conversation's messages (oldest first) so the UI can reopen it.
+async def get_conversation(conv_id: str, user_id: str = Depends(current_user_id)):
+    # Load one conversation — but only if it belongs to the requesting user.
     async with SessionLocal() as session:
+        conv = await session.get(Conversation, conv_id)
+        if conv is None or conv.user_id != user_id:
+            raise HTTPException(404, "Conversation not found")
         rows = await session.scalars(
             select(Message)
             .where(Message.conversation_id == conv_id)
@@ -137,28 +180,30 @@ async def get_conversation(conv_id: str):
 
 
 @app.delete("/conversation/{conv_id}")
-async def delete_conversation(conv_id: str):
-    # Delete the conversation row. Its messages are removed automatically by the
-    # database via the ON DELETE CASCADE on messages.conversation_id — one
-    # statement, Postgres handles the children.
+async def delete_conversation(conv_id: str, user_id: str = Depends(current_user_id)):
+    # Scope the delete by owner too, so you can't delete someone else's chat.
     async with SessionLocal() as session:
         await session.execute(
-            delete(Conversation).where(Conversation.id == conv_id)
+            delete(Conversation)
+            .where(Conversation.id == conv_id)
+            .where(Conversation.user_id == user_id)
         )
         await session.commit()
     return {"ok": True}
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     conv_id = req.conversation_id or str(uuid.uuid4())
 
     async with SessionLocal() as session:
-        # 1. Load the conversation row, creating it (titled) if brand-new.
+        # 1. Load the conversation row, creating it (owned + titled) if brand-new.
         conv = await session.get(Conversation, conv_id)
         if conv is None:
-            conv = Conversation(id=conv_id, title=req.message[:40])
+            conv = Conversation(id=conv_id, user_id=user_id, title=req.message[:40])
             session.add(conv)
+        elif conv.user_id != user_id:
+            raise HTTPException(404, "Conversation not found")
 
         # 2. Load prior messages from Postgres to rebuild the history (the "memory").
         prior = await session.scalars(
@@ -193,7 +238,7 @@ async def chat(req: ChatRequest):
 
 
 @app.post("/chat/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest, user_id: str = Depends(current_user_id)):
     # Same logic as /chat, but we relay tokens to the browser as they arrive.
     conv_id = req.conversation_id or str(uuid.uuid4())
 
@@ -203,8 +248,10 @@ async def chat_stream(req: ChatRequest):
         async with SessionLocal() as session:
             conv = await session.get(Conversation, conv_id)
             if conv is None:
-                conv = Conversation(id=conv_id, title=req.message[:40])
+                conv = Conversation(id=conv_id, user_id=user_id, title=req.message[:40])
                 session.add(conv)
+            elif conv.user_id != user_id:
+                raise HTTPException(404, "Conversation not found")
 
             prior = await session.scalars(
                 select(Message)
