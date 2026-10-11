@@ -95,6 +95,7 @@ users.id ◀──────────┘
 | `POST` | `/chat/stream` | Same, but streams the reply token-by-token (conversation id in `X-Conversation-Id` header) |
 | `GET`  | `/conversations` | Sidebar list (most recent 50) |
 | `GET`  | `/conversation/{id}` | Full transcript for one conversation |
+| `PATCH` | `/conversation/{id}` | Rename and/or pin a conversation |
 | `DELETE` | `/conversation/{id}` | Delete a conversation (messages cascade via the DB) |
 | `GET`  | `/health` | Liveness probe |
 

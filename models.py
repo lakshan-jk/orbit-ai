@@ -34,6 +34,8 @@ class Conversation(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True
     )
     title: Mapped[str] = mapped_column(Text, default="New chat")
+    # Pinned conversations sort to the top of the sidebar.
+    pinned: Mapped[bool] = mapped_column(default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

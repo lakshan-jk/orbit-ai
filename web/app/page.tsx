@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Role = "me" | "bot";
 type Message = { role: Role; text: string };
-type Convo = { id: string; title: string };
+type Convo = { id: string; title: string; pinned: boolean };
 
 const SUGGESTIONS = [
   "Explain async/await like I'm 10",
@@ -172,6 +172,8 @@ function Chat({
   const [loading, setLoading] = useState(false);
   const [convos, setConvos] = useState<Convo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const conversationId = useRef<string | null>(null);
 
@@ -228,6 +230,27 @@ function Chat({
     await authFetch(`/api/conversation/${id}`, { method: "DELETE" });
     if (conversationId.current === id) newChat();
     refreshConvos();
+  }
+
+  async function patchChat(id: string, body: { title?: string; pinned?: boolean }) {
+    await authFetch(`/api/conversation/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    refreshConvos();
+  }
+
+  function startRename(c: Convo) {
+    setEditingId(c.id);
+    setEditValue(c.title);
+  }
+
+  async function commitRename() {
+    const id = editingId;
+    const title = editValue.trim();
+    setEditingId(null);
+    if (id && title) await patchChat(id, { title });
   }
 
   async function sendText(text: string) {
@@ -322,33 +345,81 @@ function Chat({
                 (c.id === activeId ? "bg-white/[0.08]" : "hover:bg-white/[0.04]")
               }
             >
-              <button
-                onClick={() => openChat(c.id)}
-                className={
-                  "min-w-0 flex-1 truncate px-3 py-2 text-left text-sm " +
-                  (c.id === activeId
-                    ? "text-neutral-100"
-                    : "text-neutral-400 group-hover:text-neutral-200")
-                }
-                title={c.title}
-              >
-                {c.title}
-              </button>
-              <button
-                onClick={() => deleteChat(c.id)}
-                aria-label="Delete conversation"
-                title="Delete"
-                className="mr-1 hidden shrink-0 rounded-md p-1.5 text-neutral-500 transition hover:bg-white/10 hover:text-rose-400 group-hover:block"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v12a1 1 0 01-1 1H7a1 1 0 01-1-1V7"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+              {editingId === c.id ? (
+                <input
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  autoFocus
+                  className="mx-1 min-w-0 flex-1 rounded-md border border-indigo-400/50 bg-neutral-950 px-2 py-1.5 text-sm outline-none"
+                />
+              ) : (
+                <>
+                  <button
+                    onClick={() => openChat(c.id)}
+                    onDoubleClick={() => startRename(c)}
+                    className={
+                      "flex min-w-0 flex-1 items-center gap-1.5 px-3 py-2 text-left text-sm " +
+                      (c.id === activeId
+                        ? "text-neutral-100"
+                        : "text-neutral-400 group-hover:text-neutral-200")
+                    }
+                    title={c.title}
+                  >
+                    {c.pinned && (
+                      <span className="shrink-0 text-indigo-400" title="Pinned">
+                        <PinIcon filled />
+                      </span>
+                    )}
+                    <span className="truncate">{c.title}</span>
+                  </button>
+                  <div className="mr-1 hidden shrink-0 items-center group-hover:flex">
+                    <button
+                      onClick={() => patchChat(c.id, { pinned: !c.pinned })}
+                      aria-label={c.pinned ? "Unpin" : "Pin"}
+                      title={c.pinned ? "Unpin" : "Pin"}
+                      className="rounded-md p-1.5 text-neutral-500 transition hover:bg-white/10 hover:text-indigo-400"
+                    >
+                      <PinIcon filled={c.pinned} />
+                    </button>
+                    <button
+                      onClick={() => startRename(c)}
+                      aria-label="Rename"
+                      title="Rename"
+                      className="rounded-md p-1.5 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-100"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M4 20h4L18.5 9.5a2 2 0 00-2.83-2.83L5 17v3z M13.5 6.5l4 4"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => deleteChat(c.id)}
+                      aria-label="Delete conversation"
+                      title="Delete"
+                      className="rounded-md p-1.5 text-neutral-500 transition hover:bg-white/10 hover:text-rose-400"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m2 0v12a1 1 0 01-1 1H7a1 1 0 01-1-1V7"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -495,6 +566,23 @@ function Row({ role, children }: { role: Role; children: React.ReactNode }) {
         {children}
       </div>
     </div>
+  );
+}
+
+function PinIcon({ filled = false }: { filled?: boolean }) {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 17v5M9 3h6l-1 6 3 3H7l3-3-1-6z" />
+    </svg>
   );
 }
 
