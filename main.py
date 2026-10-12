@@ -149,17 +149,45 @@ def health():
 
 @app.get("/conversations")
 async def list_conversations(user_id: str = Depends(current_user_id)):
-    # The sidebar list — only THIS user's conversations, newest first.
+    # The sidebar list — only THIS user's conversations, pinned first then newest.
     async with SessionLocal() as session:
         rows = await session.scalars(
             select(Conversation)
             .where(Conversation.user_id == user_id)
-            .order_by(Conversation.created_at.desc())
+            .order_by(Conversation.pinned.desc(), Conversation.created_at.desc())
             .limit(50)
         )
         return {
-            "conversations": [{"id": c.id, "title": c.title} for c in rows]
+            "conversations": [
+                {"id": c.id, "title": c.title, "pinned": c.pinned} for c in rows
+            ]
         }
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
+
+
+@app.patch("/conversation/{conv_id}")
+async def update_conversation(
+    conv_id: str,
+    patch: ConversationPatch,
+    user_id: str = Depends(current_user_id),
+):
+    # Rename and/or pin — scoped to the owner.
+    async with SessionLocal() as session:
+        conv = await session.get(Conversation, conv_id)
+        if conv is None or conv.user_id != user_id:
+            raise HTTPException(404, "Conversation not found")
+        if patch.title is not None:
+            title = patch.title.strip()
+            if title:
+                conv.title = title[:80]
+        if patch.pinned is not None:
+            conv.pinned = patch.pinned
+        await session.commit()
+        return {"id": conv.id, "title": conv.title, "pinned": conv.pinned}
 
 
 @app.get("/conversation/{conv_id}")
