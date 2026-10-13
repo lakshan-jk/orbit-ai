@@ -125,6 +125,8 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **Stateless auth via JWT.** Login issues a signed JWT; the client sends it as a `Bearer` token on every request. No server-side session store — the token *is* the session, which keeps the API horizontally scalable (any instance can verify it with the shared secret). Passwords are **bcrypt**-hashed, never stored in plaintext.
 
+**Markdown rendered client-side.** Bot replies are stored as raw text (portable, model-agnostic) and rendered to Markdown in the browser — GFM plus syntax-highlighted code blocks. User messages stay literal. Keeping rendering at the edge means the stored data and the API contract never change.
+
 **Ownership enforced in the query, not the app.** Every conversation read/write is scoped by `WHERE user_id = <caller>`. Accessing another user's conversation returns `404` (not `403`) so the API never even confirms the row exists. Tenant isolation lives at the data-access layer, not in scattered `if` checks.
 
 ---
