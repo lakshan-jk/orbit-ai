@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import Markdown from "./Markdown";
+
 type Role = "me" | "bot";
 type Message = { role: Role; text: string };
 type Convo = { id: string; title: string; pinned: boolean };
@@ -557,13 +559,19 @@ function Row({ role, children }: { role: Role; children: React.ReactNode }) {
       </div>
       <div
         className={
-          "max-w-[78%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed " +
+          "max-w-[78%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed " +
           (isMe
-            ? "rounded-tr-sm bg-blue-600 text-white"
+            ? "whitespace-pre-wrap rounded-tr-sm bg-blue-600 text-white"
             : "rounded-tl-sm border border-white/10 bg-white/[0.04] text-neutral-100")
         }
       >
-        {children}
+        {/* Bot string replies render as Markdown; user text and the typing
+            indicator (JSX) pass through literally. */}
+        {!isMe && typeof children === "string" ? (
+          <Markdown>{children}</Markdown>
+        ) : (
+          children
+        )}
       </div>
     </div>
   );
