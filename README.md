@@ -164,6 +164,21 @@ Open the frontend and start chatting. Nothing leaves your machine.
 
 ---
 
+## Run with Docker
+
+Postgres, the backend, and the frontend come up together. **Ollama runs on the
+host** (the model is big and stays local) — start it first, then:
+
+```bash
+ollama serve           # with llama3.2 pulled
+docker compose up --build
+# → open http://localhost:3000
+```
+
+The backend reaches host Ollama via `host.docker.internal`; the frontend proxies
+`/api/*` to the `backend` service; migrations run automatically on boot. Override
+`ORBIT_JWT_SECRET` for anything beyond local use.
+
 ## Tests
 
 Backend tests run the ASGI app in-process (`httpx.ASGITransport`) against a real

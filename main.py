@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 
 import httpx
@@ -14,9 +15,10 @@ from models import Conversation, Message, User
 # `app` is our waiter. Every route below is something the waiter knows how to do.
 app = FastAPI(title="Pulse")
 
-# Where the kitchen (Ollama) lives, and which cook (model) we use.
-OLLAMA_URL = "http://127.0.0.1:11434/api/chat"
-MODEL = "llama3.2"
+# Where the kitchen (Ollama) lives, and which cook (model) we use. Both are
+# env-overridable so a container can reach Ollama on the host.
+OLLAMA_URL = os.environ.get("ORBIT_OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
+MODEL = os.environ.get("ORBIT_MODEL", "llama3.2")
 
 # Orbit's personality. Injected as a "system" message on every inference call
 # (never stored in the DB) — so editing this instantly re-flavours every chat.
