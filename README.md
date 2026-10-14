@@ -1,5 +1,7 @@
 # orbit-ai 🛰️
 
+[![CI](https://github.com/lakshan-jk/orbit-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/lakshan-jk/orbit-ai/actions/workflows/ci.yml)
+
 A private, local-first AI chatbot. An LLM runs entirely on your machine — **no API keys, no cloud, no per-token cost** — behind a production-shaped full-stack architecture: typed React client, async Python API, relational persistence, and versioned schema migrations.
 
 > Built as a study in getting the *fundamentals* right: clean service boundaries, a storage layer that evolved without breaking its consumers, and migrations you could run against a real production database.
@@ -161,6 +163,21 @@ cd web && npm install && npm run dev
 Open the frontend and start chatting. Nothing leaves your machine.
 
 ---
+
+## Tests
+
+Backend tests run the ASGI app in-process (`httpx.ASGITransport`) against a real
+Postgres, with the model call stubbed so they're fast and deterministic. Each
+test gets a fresh schema; auth, tenant isolation, rename/pin ordering, and
+delete scoping are all covered.
+
+```bash
+createdb orbit_test
+ORBIT_DATABASE_URL=postgresql+asyncpg://localhost:5432/orbit_test pytest -q
+```
+
+CI (GitHub Actions) runs the suite against a Postgres service container and
+typechecks + builds the frontend on every push and PR.
 
 ## Project layout
 
