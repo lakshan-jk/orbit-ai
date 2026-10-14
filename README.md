@@ -177,7 +177,7 @@ ORBIT_DATABASE_URL=postgresql+asyncpg://localhost:5432/orbit_test pytest -q
 ```
 
 CI (GitHub Actions) runs the suite against a Postgres service container and
-typechecks + builds the frontend on every push and PR.
+typechecks + builds the frontend on every push to `main`.
 
 ## Project layout
 
