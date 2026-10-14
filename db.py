@@ -4,11 +4,16 @@ Think of this as the Sequelize `new Sequelize(...)` connection + `sequelize.defi
 base, split into Python's style.
 """
 
+import os
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 # asyncpg is the async Postgres driver (like `pg` in Node, but non-blocking).
-DATABASE_URL = "postgresql+asyncpg://lakshan@localhost:5432/orbit"
+# Overridable via env so tests/CI/Docker can point at a different database.
+DATABASE_URL = os.environ.get(
+    "ORBIT_DATABASE_URL", "postgresql+asyncpg://lakshan@localhost:5432/orbit"
+)
 
 # The engine manages a pool of connections to Postgres.
 engine = create_async_engine(DATABASE_URL, echo=False)

@@ -41,6 +41,15 @@ HISTORY_WINDOW = 8   # recent messages always kept verbatim
 SUMMARY_BATCH = 4    # how many messages we compress per fold
 
 
+async def ollama_complete(messages: list[dict]) -> str:
+    """One non-streaming inference call → the reply text. Isolated so tests can
+    stub it without a running model."""
+    payload = {"model": MODEL, "messages": messages, "stream": False}
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(OLLAMA_URL, json=payload)
+        return r.json()["message"]["content"]
+
+
 async def summarize_older(prev_summary: str | None, msgs: list[dict]) -> str:
     """Fold older messages into a concise running summary (one model call)."""
     transcript = "\n".join(f"{m['role']}: {m['content']}" for m in msgs)
@@ -52,17 +61,13 @@ async def summarize_older(prev_summary: str | None, msgs: list[dict]) -> str:
     user_block = (
         f"Existing summary:\n{prev_summary}\n\n" if prev_summary else ""
     ) + f"New messages to fold in:\n{transcript}"
-    payload = {
-        "model": MODEL,
-        "messages": [
+    reply = await ollama_complete(
+        [
             {"role": "system", "content": instruction},
             {"role": "user", "content": user_block},
-        ],
-        "stream": False,
-    }
-    async with httpx.AsyncClient(timeout=120) as client:
-        r = await client.post(OLLAMA_URL, json=payload)
-        return r.json()["message"]["content"].strip()
+        ]
+    )
+    return reply.strip()
 
 
 async def build_context(conv: Conversation, history: list[dict]) -> list[dict]:
@@ -249,11 +254,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
 
         # 4. Build a size-bounded context (system + rolling summary + recent tail).
         context = await build_context(conv, history)
-        payload = {"model": MODEL, "messages": context, "stream": False}
-        async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(OLLAMA_URL, json=payload)
-            data = r.json()
-        reply = data["message"]["content"]
+        reply = await ollama_complete(context)
 
         # 5. Persist the assistant's reply, then commit everything in one transaction.
         session.add(
