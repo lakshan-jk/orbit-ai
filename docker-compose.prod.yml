@@ -1,0 +1,75 @@
+# Fully self-hosted Orbit — everything in-stack, including the model.
+# One command on a box with enough RAM (llama3.2 wants ~8 GB headroom):
+#
+#   export ORBIT_JWT_SECRET=$(openssl rand -hex 32)
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   → http://<server>:3000
+#
+# See DEPLOY.md for provisioning + TLS/domain.
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orbit}
+      POSTGRES_DB: orbit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama_models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # One-shot: pull llama3.2 into the ollama server's volume, then exit.
+  ollama-pull:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "llama3.2"]
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+    environment:
+      ORBIT_DATABASE_URL: postgresql+asyncpg://orbit:${POSTGRES_PASSWORD:-orbit}@db:5432/orbit
+      ORBIT_OLLAMA_URL: http://ollama:11434/api/chat
+      ORBIT_JWT_SECRET: ${ORBIT_JWT_SECRET:?set a 32+ byte secret, e.g. openssl rand -hex 32}
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+    environment:
+      BACKEND_URL: http://backend:8100
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  ollama_models:
