@@ -181,6 +181,19 @@ The backend reaches host Ollama via `host.docker.internal`; the frontend proxies
 `/api/*` to the `backend` service; migrations run automatically on boot. Override
 `ORBIT_JWT_SECRET` for anything beyond local use.
 
+### Deploy (fully self-hosted)
+
+`docker-compose.prod.yml` runs **everything in-stack — including the model** (Ollama
++ llama3.2 auto-pulled) — so one command stands Orbit up on any server with enough
+RAM. Only the web UI is exposed; backend + model stay internal.
+
+```bash
+export ORBIT_JWT_SECRET=$(openssl rand -hex 32)
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Full runbook (host sizing, firewall, domain + automatic HTTPS, ops): **[DEPLOY.md](DEPLOY.md)**.
+
 ## Tests
 
 Backend tests run the ASGI app in-process (`httpx.ASGITransport`) against a real
