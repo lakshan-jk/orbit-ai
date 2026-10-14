@@ -3,17 +3,36 @@ import os
 import uuid
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 
+import ratelimit
 from auth import create_token, current_user_id, hash_password, verify_password
 from db import SessionLocal
 from models import Conversation, Message, User
 
 # `app` is our waiter. Every route below is something the waiter knows how to do.
 app = FastAPI(title="Pulse")
+
+# Rate limits as (max_requests, window_seconds). Module-level so tests can tune.
+AUTH_RATE = (10, 60)   # per IP — slows brute-force / signup abuse
+CHAT_RATE = (30, 60)   # per user — stops one account hammering the model
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    # Baseline hardening headers on every response.
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 # Where the kitchen (Ollama) lives, and which cook (model) we use. Both are
 # env-overridable so a container can reach Ollama on the host.
@@ -102,17 +121,18 @@ async def build_context(conv: Conversation, history: list[dict]) -> list[dict]:
 # The shape of an incoming order. `conversation_id` is optional: on the very
 # first message the client has none, so the server creates one and hands it back.
 class ChatRequest(BaseModel):
-    message: str
-    conversation_id: str | None = None
+    message: str = Field(min_length=1, max_length=8000)
+    conversation_id: str | None = Field(default=None, max_length=64)
 
 
 class AuthRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
 
 
 @app.post("/auth/register")
-async def register(req: AuthRequest):
+async def register(req: AuthRequest, request: Request):
+    ratelimit.hit(f"auth:{client_ip(request)}", *AUTH_RATE)
     email = req.email.strip().lower()
     if not email or len(req.password) < 6:
         raise HTTPException(400, "Email required and password must be 6+ characters")
@@ -131,7 +151,8 @@ async def register(req: AuthRequest):
 
 
 @app.post("/auth/login")
-async def login(req: AuthRequest):
+async def login(req: AuthRequest, request: Request):
+    ratelimit.hit(f"auth:{client_ip(request)}", *AUTH_RATE)
     email = req.email.strip().lower()
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.email == email))
@@ -229,6 +250,7 @@ async def delete_conversation(conv_id: str, user_id: str = Depends(current_user_
 
 @app.post("/chat")
 async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
+    ratelimit.hit(f"chat:{user_id}", *CHAT_RATE)
     conv_id = req.conversation_id or str(uuid.uuid4())
 
     async with SessionLocal() as session:
@@ -271,6 +293,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest, user_id: str = Depends(current_user_id)):
     # Same logic as /chat, but we relay tokens to the browser as they arrive.
+    ratelimit.hit(f"chat:{user_id}", *CHAT_RATE)
     conv_id = req.conversation_id or str(uuid.uuid4())
 
     async def token_stream():

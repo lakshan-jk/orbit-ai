@@ -129,6 +129,8 @@ Request/response bodies are validated by **Pydantic** — malformed input is rej
 
 **Markdown rendered client-side.** Bot replies are stored as raw text (portable, model-agnostic) and rendered to Markdown in the browser — GFM plus syntax-highlighted code blocks. User messages stay literal. Keeping rendering at the edge means the stored data and the API contract never change.
 
+**Defense in depth at the edge.** Auth routes are rate-limited per IP (brute-force / signup abuse) and chat per user (one account can't hammer the model), returning `429` with `Retry-After`. Payloads are size-capped by Pydantic (`422` before any handler runs), and every response carries `nosniff` / `DENY` / `no-referrer` headers. The limiter is in-process (fine for one instance); at scale it moves behind Redis with the same interface.
+
 **Ownership enforced in the query, not the app.** Every conversation read/write is scoped by `WHERE user_id = <caller>`. Accessing another user's conversation returns `404` (not `403`) so the API never even confirms the row exists. Tenant isolation lives at the data-access layer, not in scattered `if` checks.
 
 ---
