@@ -1,0 +1,10 @@
+# Backend image shouldn't carry the frontend, venv, or local cruft.
+.venv/
+__pycache__/
+*.pyc
+web/
+.git/
+.github/
+tests/
+*.md
+.DS_Store
