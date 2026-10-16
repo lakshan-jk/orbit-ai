@@ -6,9 +6,23 @@ A private, local-first AI chatbot. An LLM runs entirely on your machine — **no
 
 > Built as a study in getting the *fundamentals* right: clean service boundaries, a storage layer that evolved without breaking its consumers, and migrations you could run against a real production database.
 
+## Screenshots
+
+|  |  |
+|---|---|
+| **Sign in** — accounts, JWT auth | **Start a chat** — suggestions + per-user history |
+| ![Login](docs/screenshots/login.png) | ![Empty state](docs/screenshots/empty.png) |
+
+**Markdown replies** — streamed, with syntax-highlighted code, plus a sidebar you can pin / rename / delete:
+
+![Conversation](docs/screenshots/conversation.png)
+
+> A 90-second walkthrough script (for a recording or interview demo) lives in **[docs/DEMO.md](docs/DEMO.md)**.
+
 ---
 
 ## Table of contents
+- [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Request lifecycle](#request-lifecycle)
 - [Data model](#data-model)
